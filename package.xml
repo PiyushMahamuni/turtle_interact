@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>turtle_interact</name>
+  <version>0.0.0</version>
+  <description>The turtle_interact package - Allows you to interact with turtlesim_node
+  through various nodes of its own.
+  Nodes - 
+  1. turtle_draw - makes turtlesim_node draw circle, squares, move to specific point,
+  move forward or backward, turn by specific amount.
+  *IN FUTURE* it'll be able to recieve all these commands through `/turtle_draw/order` topic
+  msg type and make robot move or you can enter respective command through terminal as well.
+  </description>
+
+  <maintainer email="mahamunipiyush@outlook.com">coderp</maintainer>
+  <license>BSD</license>
+
+  <!-- Url tags are optional, but multiple are allowed, one per tag -->
+  <!-- Optional attribute type can be: website, bugtracker, or repository -->
+  <!-- Example: -->
+  <!-- <url type="website"></url> -->
+
+  <author email="piyushmahamuni@outlook.com">Piyush Mahamuni</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>turtlesim</build_depend>
+  <build_depend>message_generation</build_depend>
+  
+  <build_export_depend>geometry_msgs</build_export_depend>
+  <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>rospy</build_export_depend>
+  <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>turtlesim</build_export_depend>
+  
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>turtlesim</exec_depend>
+  <exec_depend>message_runtime</exec_depend>
+
+  <!-- The export tag contains other, unspecified, tags -->
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+
+  </export>
+</package>
