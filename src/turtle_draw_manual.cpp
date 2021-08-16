@@ -2,18 +2,16 @@
 #include "ros/ros.h"
 #include "turtlesim/Pose.h"        // msg type
 #include "geometry_msgs/Twist.h"   // msg type
-#include "turtle_interact/Order.h" // msg type
 #include "std_msgs/String.h"       // msg type
-#include <queue>
+#include <sstream>
 
 
 // Constants -
-const char *node_name{"turtle_draw"};
+const char *node_name{"turtle_draw_manual"};
 const char *vel_pub_topic{"turtle1/cmd_vel"};
 const char *pose_sub_topic{"turtle1/pose"};
-const char *order_sub_topic{"turtle_draw/order_queue"};
-const char *turtle_controller_topic{"turtle_draw/controller"};
-
+const char *turtle_controller_topic{"turtle_draw/controller"};  // topic telling which node
+                                                                // is currently controlling robot
 const _Float32 pi{3.14159265358979};
 const _Float32 pi_2{2 * pi};
 const _Float32 pi_by_2{pi / 2};
@@ -24,23 +22,21 @@ const _Float32 xylim1{0.035}, xylim2{10 - xylim1}; // limits
 const _Float32 ltd{0.05};                          // linear threshold distance
 const ros::Duration *blink;                        // blinking time, to keep cpu from overclocking, need to be setup after starting node in main
 #define BLINKDUR 1.0 / 500
-const ros::Duration *wait;
-#define WAITDUR 1.5
+const ros::Duration* wait;                         // waiting duration
+#define WAITDUR  1.5
 
 // Globals -
 ros::Subscriber pose_sub;                                       // subscriber of turtle1/pose
-ros::Subscriber order_sub;                                      // subscriber of turtle_draw/order
-ros::Subscriber cntrlr_sub;                                     // subscriber of turtle_draw/controller
 ros::Publisher vel_pub;                                         // publisher of turtle1/cmd_vel
-ros::Publisher cntrlr_pub;                                      // publisher of turtle_draw/controller
+ros::Publisher cntrlr_pub;                                      // pubscriber of turtle_draw/controller
+ros::Subscriber cntrlr_sub;                                      // subscriber of turtle_draw/controller
 geometry_msgs::Twist msg, stop_msg;                             // initialise to correct values in main
-std_msgs::String taking_control, leaving_control;               // msgs telling that node is taking/leaving control of turtlebot
 turtlesim::Pose tpos, cpos;                                     // target position and current position
 ros::Timer vel_pub_timer;                                       // timer to periodically call vel_pub.publish();
-std::queue<turtle_interact::Order> order_queue; // queue of received orders
-ros::Timer check_orders_timer;                                  // timer to periodically check pending orders
-bool controlling{false};                                        // boolean storing ans to, if this node is in control of robot
 std::string controller;                                         // name of current controller node of robot
+std_msgs::String taking_control;                                // msg telling that this node has taken control of robot
+std_msgs::String leaving_control;                               // msg telling that this node has left the control of robot
+bool controlling{false};                                        // boolean storing ans to, if this node is in control of robot
 _Float32 ltt;                                                   // stores last target theta, to avoid error accumulation
 
 // callback functions for turtlesim/pose topic
@@ -79,94 +75,9 @@ bool is_crashing()
 // tutle1/cmd_vel topic
 void publish_vel(const ros::TimerEvent &event)
 {
-    if(controlling) vel_pub.publish(msg);
+    if(controlling) vel_pub.publish(msg); // publish only if you're the one controlling
     return;
 }
-
-
-// Functoins for turtle_draw/controller topic ---------------------------
-// Subscriber callback
-void cntrlr_sub_calb(const std_msgs::String::ConstPtr& msg){
-    controller = msg->data;
-    return;
-}
-
-// check if the robot is free to take control of
-bool can_take_over_control(bool log = true){
-    if(log) ROS_INFO("[%s] Checking if robot is free to take control of...", node_name);
-    ros::spinOnce();
-    return controller == "" || controller == "free";
-}
-
-// take over the control of robot
-bool take_over_control(bool log = true){
-    if(controlling){
-        if(log) ROS_INFO("[%s] Already in control of turtle bot\n\n",node_name);
-        return true;
-    }
-    else if(!can_take_over_control){ 
-        if(log) ROS_INFO("[%s] Attempt of taking over control of turtle bot failed!\n\n", node_name);
-        return controlling = false;
-    }
-    cntrlr_pub.publish(taking_control);
-    if(log){
-         ROS_INFO("[%s] Taking over the control of turtle bot...", node_name);
-         ROS_INFO("[%s] Updating position...\n\n");
-    }
-    ros::spinOnce();
-    ltt = cpos.theta;
-    return controlling = true;
-}
-
-// leave control of the robot
-bool leave_control(bool log = true){
-    if(!controlling){
-        if(log) ROS_INFO("[%s] Already not controlling the robot!\n\n", node_name);
-    }
-    else {
-        cntrlr_pub.publish(leaving_control);
-        if(log) ROS_INFO("[%s] Leaving control of the turtle bot\n\n", node_name);
-    }
-    controlling = false;
-    return true;
-}
-
-// returns the name of the current controller of the robot
-std::string current_controller(){
-    ros::spinOnce();
-    return controller;
-}
-
-// wait to take control of robot
-bool wait_take_control(int mins, bool indefinite = false){
-    if(controlling) return true;
-    std::cout << "Hit cntr+c to stop the wait, it won't kill the node while waiting" << std::endl;
-    if(indefinite){
-        ROS_INFO("[%s] Waiting indefinitely to take the control of turtle bot", node_name);
-        while(!can_take_over_control() && ros::ok()){
-            wait->sleep();
-        }
-    }
-    else{
-        ROS_INFO("[%s] Will wait for %d minutes to take the control of turtle bot", node_name, mins);
-        ros::SteadyTime waiting_time;
-        u_int32_t stopping_time = waiting_time.toSec() + 60 * mins;
-        while(!can_take_over_control() && waiting_time.toSec() < stopping_time){
-            wait->sleep();
-        }
-        if(can_take_over_control(false)){
-            take_over_control();
-        }
-        else{
-            ROS_INFO("[%s] Waiting timed out. Try again!\n\n", node_name);
-            return false;
-        }
-    }
-    return true;
-}
-// -----------------------------------------------------------------------
-
-
 
 // ------------------ FUNCTIONS CONTROLLING MOTIONS ----------------------
 
@@ -586,7 +497,7 @@ inline bool circle(const _Float32 &radius, bool cclk = true, bool log = false)
     abrt = abrt || is_crashing();
     if (abrt)
     {
-        ROS_INFO("[%s] Can't perform requested operation, robot will run into wall!", node_name);
+        ROS_INFO("[%s] Can't perform requested operation, robot will run into wall!\n\n", node_name);
         return false;
     }
 
@@ -739,7 +650,7 @@ inline bool moveto(const _Float32 &x, const _Float32 &y, bool log = false)
     tpos.x = x;
     tpos.y = y;
     if (log)
-        ROS_INFO("[%s] Command received to move to target x = %f, y = %f", node_name, x, y);
+        ROS_INFO("[%s] Command received to move to target x = %f, y = %f\n\n", node_name, x, y);
     if (is_crashing())
     {
         ROS_INFO("[%s] ABORTING, robot will crash!\n\n", node_name);
@@ -776,18 +687,6 @@ inline bool moveto(const _Float32 &x, const _Float32 &y, bool log = false)
             angle = -pi - angle;
     }
     std::cout << "Approach angle: " << angle << std::endl;
-    // turn
-    // slow down for precision
-    // if(abs(cpos.theta - angle) > diff){
-    //     // traverse the first part at normal speed
-    //     if(angle > cpos.theta)
-    //     turn(angle - cpos.theta - diff, false);
-    //     else
-    //     turn(angle - cpos.theta + diff, false);
-    // }
-    // angular_sp /= 3;
-    // turntor(angle);
-    // angular_sp *= 3;
 
     turntor(angle);
     // move
@@ -802,97 +701,88 @@ inline bool moveto(const _Float32 &x, const _Float32 &y, bool log = false)
 }
 // -----------------------------------------------------------------------
 
+// Functoins for turtle_draw/controller topic ---------------------------
 
-
-//  Functions related to turtle_draw/order_queue topic-------------------
-//  callback function for turtle_draw/order_queue topic
-void order_callback(const turtle_interact::Order::ConstPtr &msg)
-{
-    static u_int32_t order_id{0};
-    turtle_interact::Order new_order;
-    new_order.command = msg->command;
-    new_order.val1 = msg->val1;
-    new_order.val2 = msg->val2;
-    new_order.cclk = msg->cclk;
-    order_queue.push(new_order);
-    ROS_INFO("[%s] Command received on turtle_draw/order_queue topic. Pushing onto order queue\nOrder ID : [%d]", node_name, order_id);
-    std::cout << "---  " << (msg->command) << " " << (msg->val1) << " " << (msg->val2) << " " << (msg->cclk) << std::endl;
-    order_id++;
+// Subscriber callback
+void cntrlr_sub_calb(const std_msgs::String::ConstPtr& msg){
+    controller = msg->data;
+    return;
 }
 
-// print current order
-void print_current_order()
-{
-    const turtle_interact::Order &order{order_queue.front()};
-    ROS_INFO("[%s] Executing order - %s %f %f %d", node_name,
-             order.command.c_str(), order.val1, order.val2, order.cclk);
+// check if the robot is free to take control of
+bool can_take_over_control(bool log = true){
+    if(log) ROS_INFO("[%s] Checking if robot is free to take control of...", node_name);
+    ros::spinOnce();
+    return controller == "" || controller == "free";
 }
-// to check pending orders periodically
-void check_orders(const ros::TimerEvent &event)
-{
-    static int order_id{0};
-    static turtle_interact::Order new_order;
-    if (order_queue.size())
-    {
-        new_order = order_queue.front();
-        if(controlling || wait_take_control(3))
-        {
-            print_current_order();
-            if (new_order.command == "turnr")
-            {
-                turnr(new_order.val1);
-            }
-            else if (new_order.command == "turnd")
-            {
-                turnd(new_order.val1);
-            }
-            else if (new_order.command == "turntor")
-            {
-                turntor(new_order.val1);
-            }
-            else if (new_order.command == "turntod")
-            {
-                turntod(new_order.val1);
-            }
-            else if (new_order.command == "forward")
-            {
-                forward(new_order.val1);
-            }
-            else if (new_order.command == "backward")
-            {
-                backward(new_order.val1);
-            }
-            else if (new_order.command == "square")
-            {
-                square(new_order.val1, new_order.cclk);
-            }
-            else if (new_order.command == "circle")
-            {
-                circle(new_order.val1, new_order.cclk);
-            }
-            else if (new_order.command == "moveto")
-            {
-                moveto(new_order.val1, new_order.val2);
-            }
-            else
-            {
-                ROS_INFO("[%s] order id [%d] Invalid command in order queue, moving to next one!\n\n", node_name, order_id);
-                goto skip_ros_info;
-            }
-            ROS_INFO("[%s] order [id: %d] completed. Moving to the next order in queue\n\n",
-            node_name, order_id);
-            skip_ros_info:
-            order_queue.pop();
-            order_id++;
-            if(order_queue.size()==0) leave_control(); // leave control only after executing a command and if the
-            // order_queue has reached size 0
+
+// take over the control of robot
+bool take_over_control(bool log = true){
+    if(controlling){
+        if(log) ROS_INFO("[%s] Already in control of turtle bot\n\n",node_name);
+        return true;
+    }
+    else if(!can_take_over_control){ 
+        if(log) ROS_INFO("[%s] Attempt of taking over control of turtle bot failed!\n\n", node_name);
+        return controlling = false;
+    }
+    cntrlr_pub.publish(taking_control);
+    if(log){
+         ROS_INFO("[%s] Taking over the control of turtle bot...", node_name);
+         ROS_INFO("[%s] Updating position...\n\n");
+    }
+    ros::spinOnce();
+    ltt = cpos.theta;
+    return controlling = true;
+}
+
+// leave control of the robot
+bool leave_control(bool log = true){
+    if(!controlling){
+        if(log) ROS_INFO("[%s] Already not controlling the robot!\n\n", node_name);
+    }
+    else {
+        cntrlr_pub.publish(leaving_control);
+        if(log) ROS_INFO("[%s] Leaving control of the turtle bot\n\n", node_name);
+    }
+    controlling = false;
+    return true;
+}
+
+// returns the name of the current controller of the robot
+std::string current_controller(){
+    ros::spinOnce();
+    return controller;
+}
+
+// wait to take control of robot
+bool wait_take_control(int mins, bool indefinite = false){
+    if(controlling) return true;
+    std::cout << "Hit cntr+c to stop the wait, it won't kill the node while waiting" << std::endl;
+    if(indefinite){
+        ROS_INFO("[%s] Waiting indefinitely to take the control of turtle bot", node_name);
+        while(!can_take_over_control() && ros::ok()){
+            wait->sleep();
         }
     }
+    else{
+        ROS_INFO("[%s] Will wait for %d minutes to take the control of turtle bot", node_name, mins);
+        ros::SteadyTime waiting_time;
+        u_int32_t stopping_time = waiting_time.toSec() + 60 * mins;
+        while(!can_take_over_control() && waiting_time.toSec() < stopping_time){
+            wait->sleep();
+        }
+        if(can_take_over_control(false)){
+            take_over_control();
+        }
+        else{
+            ROS_INFO("[%s] Waiting timed out. Try again!\n\n", node_name);
+            return false;
+        }
+    }
+    return true;
 }
-
-//------------------------------------------------------------------------
-
-
+// -----------------------------------------------------------------------
 
 
 // main program driver
@@ -911,16 +801,8 @@ int main(int argc, char **argv)
     // This node is subscriber of /turtle1/pose topic which uses turltesim/pose msg type
     pose_sub = node.subscribe(pose_sub_topic, 1, update_pose);
 
-    // This node is subscriber of /turtle_draw/order_queue topic which uses turtle_interact/Order type
-    order_sub = node.subscribe(order_sub_topic, 100, order_callback);
-
-    // setting up timer for vel_pub
-    vel_pub_timer = node.createTimer(ros::Duration(0.3), publish_vel);
-
-    // setting up timer for periodically checking order queue
-    check_orders_timer = node.createTimer(ros::Duration(0.02), check_orders);
-    // Declaring variables used in menu
-
+    // This node is both subscriber and publisher of turtle_draw/controller node having
+    // msg type of std_msgs/String
     cntrlr_sub = node.subscribe(turtle_controller_topic, 1, cntrlr_sub_calb);
     cntrlr_pub = node.advertise<std_msgs::String>(turtle_controller_topic, 1, true);
     // the topic is latched.
@@ -929,6 +811,13 @@ int main(int argc, char **argv)
     taking_control.data = node_name;
     leaving_control.data = "free";
 
+    // setting up timer for vel_pub
+    vel_pub_timer = node.createTimer(ros::Duration(0.3), publish_vel);
+
+    // Declaring variables used in menu
+
+    std::string choice, cmd;
+    _Float32 val;
 
     // Wait for a publisher of turtle1/pose, without which we can't operate
     std::cout << "Waiting for a publisher of turtle1/pose..." << std::endl;
@@ -941,13 +830,134 @@ int main(int argc, char **argv)
         }
     }
 
-    ros::spin();
-
+    // MENU ------
+    std::cout << "--- MENU ---\n"
+              << "quit: quit this program\n"
+              << "turnr <angle in radians>: turn robot through given radians\n"
+              << "turnd <angle in degrees>: turn robot through given degress\n"
+              << "turntor <angle in radians>: turn robot to specific tehta value in radians\n"
+              << "turntod <angle in degrees>: turn robot to specific theta value in degrees\n"
+              << "forward <lenght>: to move robot forward through given amount\n"
+              << "backward <length>: to move robot backwards through given amount\n"
+              << "square <side> <clk/cclk>\n"
+              << "circle <radius> <clk/cclk>\n"
+              << "moveto <x> <y>: move to given x and y cordinates\n"
+              << std::endl;
+    while (choice != "quit" && ros::ok())
+    {
+        std::cout << "Enter your order: ";
+        std::stringstream ss;
+        std::getline(std::cin, choice);
+        ss << choice;
+        if (!(ss >> cmd))
+        {
+            std::cout << "Invalid command, try again!" << std::endl;
+        }
+        else if (cmd == "quit")
+        {
+            goto ending;
+        }
+        else if (cmd == "turnr")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with turnr, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                turnr(val, true);
+            }
+        }
+        else if (cmd == "turnd")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with turnd, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                turnd(val, true);
+            }
+        }
+        else if (cmd == "turntor")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with turntor, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                turntor(val, true);
+            }
+        }
+        else if (cmd == "turntod")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with turntod, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                turntod(val, true);
+            }
+        }
+        else if (cmd == "forward")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with forward, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                forward(val, true);
+            }
+        }
+        else if (cmd == "square")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid 1st argument with square, try again" << std::endl;
+            else if (!(ss >> cmd))
+                std::cout << "Invalid 2nd argument with square, try again" << std::endl;
+            else if (cmd != "clk" && cmd != "cclk")
+                std::cout << "Invalid 2nd argument with square, try again" << std::endl;
+            else{
+                wait_take_control(5);
+                square(val, cmd == "cclk", true);
+            }
+        }
+        else if (cmd == "circle")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid 1st argument with circle, try again" << std::endl;
+            else if (!(ss >> cmd))
+                std::cout << "Invalid 2nd argument with circle, try again" << std::endl;
+            else if (cmd != "clk" && cmd != "cclk")
+                std::cout << "Invalid 2nd argument with circle, try again" << std::endl;
+            else{
+                wait_take_control(5);
+                circle(val, cmd == "cclk", true);
+            }
+        }
+        else if (cmd == "backward")
+        {
+            if (!(ss >> val))
+                std::cout << "Invalid argument with backward, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                backward(val);
+            }
+        }
+        else if (cmd == "moveto")
+        {
+            _Float32 val2;
+            if (!(ss >> val >> val2))
+                std::cout << "Invalid argument(s) with moveto, try again!" << std::endl;
+            else{
+                wait_take_control(5);
+                moveto(val, val2, true);
+            }
+        }
+        else
+        {
+            std::cout << "Invalid command, try again!" << std::endl;
+            continue;
+        }
+        leave_control();
+    }
 ending:
     std::cout << "Terminating..." << std::endl;
     delete blink;
     delete wait;
     vel_pub_timer.stop();
-    check_orders_timer.stop();
     return 0;
 }

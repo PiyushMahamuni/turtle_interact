@@ -105,7 +105,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS include
+  INCLUDE_DIRS #include
   LIBRARIES turtle_interact
   CATKIN_DEPENDS geometry_msgs roscpp rospy std_msgs turtlesim message_runtime
   DEPENDS system_lib
@@ -118,7 +118,7 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+include
   ${catkin_INCLUDE_DIRS}
 )
 
@@ -214,3 +214,8 @@ target_link_libraries(turtle_draw ${catkin_LIBRARIES})
 # order_turtle_draw
 add_executable(order_turtle_draw src/order_turtle_draw.cpp)
 target_link_libraries(order_turtle_draw ${catkin_LIBRARIES})
+
+# turtle_draw_manual
+add_executable(turtle_draw_manual src/turtle_draw_manual.cpp)
+target_link_libraries(turtle_draw_manual ${catkin_LIBRARIES})
+
